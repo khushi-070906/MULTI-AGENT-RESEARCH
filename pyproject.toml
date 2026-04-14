@@ -1,0 +1,10 @@
+[project]
+name = "multi-agent-research"
+version = "0.1.0"
+dependencies = [
+    "streamlit",
+    "pandas",
+    "numpy",
+    "requests",
+    "python-dotenv"
+]
