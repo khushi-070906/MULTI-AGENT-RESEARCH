@@ -8,6 +8,9 @@ from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
+# ── Cached Agent Singletons ────────────────────────────────────────────────────
+_search_agent = None
+_reader_agent = None
 
 openai_api_key = os.getenv("OPENAI_API_KEY")
 if not openai_api_key:
@@ -31,20 +34,26 @@ def _agent_prompt(system_msg: str) -> ChatPromptTemplate:
     ])
 
 # ── Search Agent ───────────────────────────────────────────────────────────────
-def build_search_agent() -> AgentExecutor:
-    prompt = _agent_prompt(
-        "You are a research assistant. Search the web to find accurate, relevant information."
-    )
-    agent = create_tool_calling_agent(llm=llm, tools=[web_search], prompt=prompt)
-    return AgentExecutor(agent=agent, tools=[web_search], verbose=True)
+    def build_search_agent() -> AgentExecutor:
+    global _search_agent
+    if _search_agent is None:
+        prompt = _agent_prompt(
+            "You are a research assistant. Search the web to find accurate, relevant information."
+        )
+        agent = create_tool_calling_agent(llm=llm, tools=[web_search], prompt=prompt)
+        _search_agent = AgentExecutor(agent=agent, tools=[web_search], verbose=True)
+    return _search_agent
 
-# ── Reader Agent ───────────────────────────────────────────────────────────────
+
 def build_reader_agent() -> AgentExecutor:
-    prompt = _agent_prompt(
-        "You are a content extractor. Scrape and summarize web pages clearly and concisely."
-    )
-    agent = create_tool_calling_agent(llm=llm, tools=[scrape_url], prompt=prompt)
-    return AgentExecutor(agent=agent, tools=[scrape_url], verbose=True)
+    global _reader_agent
+    if _reader_agent is None:
+        prompt = _agent_prompt(
+            "You are a content extractor. Scrape and summarize web pages clearly and concisely."
+        )
+        agent = create_tool_calling_agent(llm=llm, tools=[scrape_url], prompt=prompt)
+        _reader_agent = AgentExecutor(agent=agent, tools=[scrape_url], verbose=True)
+    return _reader_agent
 
 # ── Writer Chain (LCEL) ────────────────────────────────────────────────────────
 writer_prompt = ChatPromptTemplate.from_messages([
