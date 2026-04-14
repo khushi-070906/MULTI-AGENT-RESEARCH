@@ -373,17 +373,12 @@ def display_error(message: str) -> None:
 
 
 def run_pipeline_with_progress(query: str, progress_placeholder) -> Dict[str, Any]:
-    """
-    Run the research pipeline with accurate live progress updates.
-    FIX: original showed all steps before pipeline ran. Now each step marker
-    updates at the point the pipeline actually reaches that stage via
-    a step_callback injected into the pipeline call.
-    Since run_research_pipeline is synchronous, we approximate by updating
-    progress just before calling it (step 0) and after it returns (step 3).
-    For true per-step updates, wire step_callback into pipeline.py.
-    """
     render_progress(progress_placeholder, 0, "Searching the web")
-    result = run_research_pipeline(query.strip())          # blocking call
+
+    def on_step(step_idx: int, label: str):
+        render_progress(progress_placeholder, step_idx, label)
+
+    result = run_research_pipeline(query.strip(), on_step=on_step)
     render_progress(progress_placeholder, 3, "Critic reviewing complete")
     time.sleep(0.4)
     return result
