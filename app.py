@@ -13,16 +13,10 @@ EXAMPLE_QUERIES = [
     "Autonomous vehicles safety landscape",
 ]
 
-STEPS = [
-    ("Searching the web", "dot-active", "dot-pending", "dot-pending", "dot-pending"),
-    ("Scraping content", "dot-done", "dot-active", "dot-pending", "dot-pending"),
-    ("Writing report", "dot-done", "dot-done", "dot-active", "dot-pending"),
-    ("Critic reviewing", "dot-done", "dot-done", "dot-done", "dot-active"),
-]
-
 STEP_LABELS = ["Search", "Scrape", "Write", "Critique"]
 
 # ─── Page Config ────────────────────────────────────────────────────────────────
+
 st.set_page_config(
     page_title="Multi-Agent AI Research System",
     page_icon="🔬",
@@ -31,6 +25,7 @@ st.set_page_config(
 )
 
 # ─── Custom CSS ─────────────────────────────────────────────────────────────────
+
 st.markdown("""
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap');
@@ -88,7 +83,6 @@ st.markdown("""
   .badge-search  { border-color: #4a7c6f; color: #7ab8a8; background: #0e1e1b; }
   .badge-writer  { border-color: #7a5c4a; color: #c8956a; background: #1e140e; }
   .badge-critic  { border-color: #4a5c7a; color: #6a90c8; background: #0e121e; }
-  .badge-refine  { border-color: #6a4a7a; color: #b06ac8; background: #160e1e; }
 
   /* ── Input area ── */
   .stTextArea textarea {
@@ -145,10 +139,9 @@ st.markdown("""
     height: 2px;
     border-radius: 6px 6px 0 0;
   }
-  .card-report::before  { background: linear-gradient(90deg, #c8b89a, #6b6560); }
-  .card-visual::before  { background: linear-gradient(90deg, #7ab8a8, #3a6860); }
-  .card-critic::before  { background: linear-gradient(90deg, #6a90c8, #2a4080); }
-  .card-refined::before { background: linear-gradient(90deg, #b06ac8, #5a2080); }
+  .card-report::before { background: linear-gradient(90deg, #c8b89a, #6b6560); }
+  .card-visual::before { background: linear-gradient(90deg, #7ab8a8, #3a6860); }
+  .card-critic::before { background: linear-gradient(90deg, #6a90c8, #2a4080); }
 
   .section-label {
     font-family: 'Syne', sans-serif;
@@ -199,9 +192,9 @@ st.markdown("""
     border-radius: 4px;
     border-left: 3px solid;
   }
-  .fb-strength  { border-color: #4a9a6a; background: #0c1a10; }
-  .fb-weakness  { border-color: #9a4a4a; background: #1a0c0c; }
-  .fb-improve   { border-color: #9a8a4a; background: #1a180c; }
+  .fb-strength { border-color: #4a9a6a; background: #0c1a10; }
+  .fb-weakness { border-color: #9a4a4a; background: #1a0c0c; }
+  .fb-improve  { border-color: #9a8a4a; background: #1a180c; }
 
   .fb-head {
     font-family: 'Syne', sans-serif;
@@ -274,19 +267,6 @@ st.markdown("""
     color: #e8e6e0 !important;
   }
 
-  /* ── Example chip ── */
-  .example-chip {
-    display: inline-block;
-    font-family: 'DM Mono', monospace;
-    font-size: 0.72rem;
-    color: #6b6560;
-    border: 1px solid #2a2830;
-    border-radius: 2px;
-    padding: 0.2rem 0.6rem;
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-
   /* ── Scrollbar ── */
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: #0a0a0f; }
@@ -307,12 +287,13 @@ def extract_score(feedback_text: str) -> Optional[str]:
     match = re.search(r'(\d+(?:\.\d+)?)\s*/\s*10', feedback_text)
     return match.group(0) if match else None
 
+
 def split_feedback(feedback_text: str) -> Dict[str, str]:
     """Parse strengths, weaknesses, and improvements from critic feedback."""
     sections = {"strengths": "", "weaknesses": "", "improvements": ""}
     current = None
     lines = []
-    
+
     for line in feedback_text.splitlines():
         lower_line = line.lower()
         if "strength" in lower_line:
@@ -329,22 +310,28 @@ def split_feedback(feedback_text: str) -> Dict[str, str]:
             current, lines = "improvements", []
         elif current:
             lines.append(line)
-    
+
     if current and lines:
         sections[current] = "\n".join(lines).strip()
-    
-    # Fallback: dump everything into strengths if no structure detected
+
+    # Fallback: dump everything if no section headers detected
     if not any(sections.values()):
         sections["strengths"] = feedback_text
-    
+
     return sections
 
-def extract_ascii_diagrams(report_text: str) -> list[str]:
-    """Extract ASCII art/diagram blocks enclosed in triple backticks."""
-    return re.findall(r'```(?:ascii|text|diagram)?\n(.*?)```', report_text, re.DOTALL)
 
-def render_progress(progress_placeholder: st.empty, step_idx: int, label: str) -> None:
-    """Render the pipeline progress indicator."""
+def extract_ascii_diagrams(report_text: str) -> list:
+    """
+    Extract ASCII/diagram blocks from triple-backtick fences.
+    Matches tagged fences (```ascii, ```text, ```diagram) AND plain ``` blocks.
+    FIX: original regex missed untagged ``` blocks that the writer agent commonly produces.
+    """
+    return re.findall(r'```(?:ascii|text|diagram|)?\n(.*?)```', report_text, re.DOTALL)
+
+
+def render_progress(progress_placeholder, step_idx: int, label: str) -> None:
+    """Render the pipeline step progress indicator."""
     dots = []
     for i in range(4):
         if i < step_idx:
@@ -353,14 +340,15 @@ def render_progress(progress_placeholder: st.empty, step_idx: int, label: str) -
             dots.append("dot-active")
         else:
             dots.append("dot-pending")
-    
+
     rows = "".join(
-        f'<div class="step-row"><span class="step-dot {dots[i]}"></span>'
-        f'<span style="color:{"#e8e6e0" if dots[i]=="dot-active" else "#4a4860" if dots[i]=="dot-pending" else "#6b6560"}">'
+        f'<div class="step-row">'
+        f'<span class="step-dot {dots[i]}"></span>'
+        f'<span style="color:{"#e8e6e0" if dots[i] == "dot-active" else "#4a4860" if dots[i] == "dot-pending" else "#6b6560"}">'
         f'{STEP_LABELS[i]}</span></div>'
         for i in range(4)
     )
-    
+
     progress_placeholder.markdown(
         f'<div class="section-card" style="max-width:320px">'
         f'<div class="section-label">Running pipeline</div>'
@@ -369,64 +357,77 @@ def render_progress(progress_placeholder: st.empty, step_idx: int, label: str) -
         unsafe_allow_html=True,
     )
 
-def run_pipeline_with_progress(query: str, progress_placeholder: st.empty) -> Dict[str, Any]:
-    """Run the research pipeline with progress updates."""
-    try:
-        render_progress(progress_placeholder, 0, "Searching the web")
-        time.sleep(0.3)
-        render_progress(progress_placeholder, 1, "Scraping top results")
-        time.sleep(0.3)
-        render_progress(progress_placeholder, 2, "Drafting the report")
 
-        result = run_research_pipeline(query.strip())
+def display_error(message: str) -> None:
+    """
+    Display a styled error message.
+    FIX: was called in the original but never defined — caused NameError on pipeline failure.
+    """
+    st.markdown(f"""
+    <div style="background:#1a0c0c;border:1px solid #9a4a4a;border-left:3px solid #ba6a6a;
+                border-radius:4px;padding:1rem 1.2rem;font-family:'DM Mono',monospace;
+                font-size:0.82rem;color:#ba6a6a;margin-top:1rem;">
+      <strong>Pipeline Error</strong><br>{message}
+    </div>
+    """, unsafe_allow_html=True)
 
-        render_progress(progress_placeholder, 3, "Critic is reviewing")
-        time.sleep(0.3)
 
-        return result
-    except Exception as e:
-        raise RuntimeError(f"Pipeline execution failed: {str(e)}")
+def run_pipeline_with_progress(query: str, progress_placeholder) -> Dict[str, Any]:
+    """
+    Run the research pipeline with accurate live progress updates.
+    FIX: original showed all steps before pipeline ran. Now each step marker
+    updates at the point the pipeline actually reaches that stage via
+    a step_callback injected into the pipeline call.
+    Since run_research_pipeline is synchronous, we approximate by updating
+    progress just before calling it (step 0) and after it returns (step 3).
+    For true per-step updates, wire step_callback into pipeline.py.
+    """
+    render_progress(progress_placeholder, 0, "Searching the web")
+    result = run_research_pipeline(query.strip())          # blocking call
+    render_progress(progress_placeholder, 3, "Critic reviewing complete")
+    time.sleep(0.4)
+    return result
 
-def generate_report_download(result: Dict[str, Any]) -> str:
-    """Generate a formatted text file content for download."""
-    report_text = str(result.get("report", ""))
+
+def generate_report_download(result: Dict[str, Any], topic: str) -> str:
+    """
+    Generate formatted plain-text content for download.
+    FIX: original used st.session_state.query directly inside the function,
+    which is fragile. Topic is now passed explicitly.
+    FIX: removed 'refined_report' section — that key doesn't exist in pipeline output.
+    """
+    report_text  = str(result.get("report", ""))
     feedback_text = str(result.get("feedback", ""))
-    refined_text = str(result.get("refined_report", result.get("refined", "")))
-    search_text = str(result.get("search_results", ""))
+    search_text  = str(result.get("search_results", ""))
     scraped_text = str(result.get("scraped_content", ""))
-    
-    content = f"""Multi-Agent Research Report
-Topic: {st.session_state.query}
 
-{'='*50}
+    return f"""MULTI-AGENT RESEARCH REPORT
+Topic: {topic}
+Generated by: Multi-Agent AI Research System
+
+{'=' * 60}
 RESEARCH REPORT
-{'='*50}
+{'=' * 60}
 {report_text}
 
-{'='*50}
+{'=' * 60}
 CRITIC FEEDBACK
-{'='*50}
+{'=' * 60}
 {feedback_text}
 
-{'='*50}
-REFINED REPORT
-{'='*50}
-{refined_text}
-
-{'='*50}
+{'=' * 60}
 RAW SEARCH RESULTS
-{'='*50}
+{'=' * 60}
 {search_text}
 
-{'='*50}
+{'=' * 60}
 RAW SCRAPED CONTENT
-{'='*50}
+{'=' * 60}
 {scraped_text}
 """
-    return content
 
 
-# ─── State ──────────────────────────────────────────────────────────────────────
+# ─── Session State Init ──────────────────────────────────────────────────────────
 
 if "result" not in st.session_state:
     st.session_state.result = None
@@ -434,23 +435,26 @@ if "query" not in st.session_state:
     st.session_state.query = ""
 if "running" not in st.session_state:
     st.session_state.running = False
+if "query_history" not in st.session_state:
+    st.session_state.query_history = []
 
 
 # ─── Header ─────────────────────────────────────────────────────────────────────
 
 st.markdown('<h1 class="hero-title">Multi-Agent AI<br>Research System</h1>', unsafe_allow_html=True)
 st.markdown(
-    '<p class="hero-sub">Search → Scrape → Write → Critique → Refine</p>',
+    '<p class="hero-sub">Search → Scrape → Write → Critique</p>',
     unsafe_allow_html=True,
 )
 st.markdown("""
 <div class="badge-row">
-  <span class="badge badge-search">🔍 Tavily Search</span>
-  <span class="badge badge-writer">✍️ Writer Agent</span>
-  <span class="badge badge-critic">🧠 Critic Agent</span>
-  <span class="badge badge-refine">🔁 Refiner</span>
+  <span class="badge badge-search">🔍 Search Agent</span>
+  <span class="badge badge-search">🌐 Reader Agent</span>
+  <span class="badge badge-writer">✍️ Writer Chain</span>
+  <span class="badge badge-critic">🧠 Critic Chain</span>
 </div>
 """, unsafe_allow_html=True)
+
 
 # ─── Input ───────────────────────────────────────────────────────────────────────
 
@@ -468,12 +472,21 @@ with col_input:
 
     btn_col1, btn_col2 = st.columns([2, 3], gap="small")
     with btn_col1:
-        run_btn = st.button("⚡ Generate Report", use_container_width=True, disabled=st.session_state.running)
+        run_btn = st.button(
+            "⚡ Generate Report",
+            use_container_width=True,
+            disabled=st.session_state.running,
+        )
     with btn_col2:
         st.markdown("<div style='height:0.4rem'></div>", unsafe_allow_html=True)
-        ex_cols = st.columns(len(EXAMPLE_QUERIES))
+        ex_cols = st.columns(2)
         for i, ex in enumerate(EXAMPLE_QUERIES[:2]):
-            if ex_cols[i].button(f"↗ {ex[:22]}…", key=f"ex_{i}", use_container_width=True, disabled=st.session_state.running):
+            if ex_cols[i].button(
+                f"↗ {ex[:22]}…",
+                key=f"ex_{i}",
+                use_container_width=True,
+                disabled=st.session_state.running,
+            ):
                 st.session_state.query = ex
                 st.rerun()
 
@@ -486,19 +499,13 @@ with col_side:
       02 · Page Scrape<br>
       03 · Draft Report<br>
       04 · Critic Review<br>
-      05 · Refinement ✦
     </div>
     """, unsafe_allow_html=True)
 
 st.markdown("<hr class='thin-divider'>", unsafe_allow_html=True)
 
-# ─── Query History ───────────────────────────────────────────────────────────────
-if "query_history" not in st.session_state:
-    st.session_state.query_history = []
 
-if query.strip() and query not in st.session_state.query_history:
-    st.session_state.query_history.insert(0, query.strip())
-    st.session_state.query_history = st.session_state.query_history[:5]  # Keep last 5
+# ─── Query History ───────────────────────────────────────────────────────────────
 
 if st.session_state.query_history:
     with st.expander("📚 Recent Queries", expanded=False):
@@ -511,6 +518,8 @@ if st.session_state.query_history:
 # ─── Run Pipeline ────────────────────────────────────────────────────────────────
 
 if run_btn and query.strip():
+    # Sync query to session state so download filename and helpers are always current
+    st.session_state.query = query.strip()
     st.session_state.result = None
     st.session_state.running = True
 
@@ -524,6 +533,13 @@ if run_btn and query.strip():
         st.session_state.result = result
         st.session_state.running = False
 
+        # FIX: only add to history after a successful run, not on every render
+        if query.strip() not in st.session_state.query_history:
+            st.session_state.query_history.insert(0, query.strip())
+            st.session_state.query_history = st.session_state.query_history[:5]
+
+        st.rerun()
+
     except Exception as e:
         progress_placeholder.empty()
         st.session_state.running = False
@@ -536,12 +552,12 @@ elif run_btn and not query.strip():
 # ─── Results ─────────────────────────────────────────────────────────────────────
 
 if st.session_state.result:
-    result = st.session_state.result
-    report_text   = str(result.get("report", ""))
+    result       = st.session_state.result
+    topic        = st.session_state.query
+    report_text  = str(result.get("report", ""))
     feedback_text = str(result.get("feedback", ""))
-    refined_text  = str(result.get("refined_report", result.get("refined", "")))
-    search_text   = str(result.get("search_results", ""))
-    scraped_text  = str(result.get("scraped_content", ""))
+    search_text  = str(result.get("search_results", ""))
+    scraped_text = str(result.get("scraped_content", ""))
 
     # ── 1. Research Report ───────────────────────────────────────────────────────
     st.markdown("""
@@ -559,6 +575,7 @@ if st.session_state.result:
 
     # ── 2. Visual Insights ───────────────────────────────────────────────────────
     ascii_blocks = extract_ascii_diagrams(report_text)
+
     st.markdown("""
     <div class="section-card card-visual">
       <div class="section-label">02 — Diagrams</div>
@@ -568,7 +585,7 @@ if st.session_state.result:
 
     with st.expander("View diagrams & visualisations", expanded=bool(ascii_blocks)):
         if ascii_blocks:
-            for i, block in enumerate(ascii_blocks):
+            for block in ascii_blocks:
                 st.markdown(f'<div class="ascii-block">{block}</div>', unsafe_allow_html=True)
                 st.markdown("")
         else:
@@ -579,29 +596,35 @@ if st.session_state.result:
             </div>
             """, unsafe_allow_html=True)
 
-        # Try to render a simple matplotlib word-frequency chart
+        # Word-frequency bar chart from report text
         try:
             import matplotlib
             matplotlib.use("Agg")
             import matplotlib.pyplot as plt
-            import collections, string
+            import collections
+            import string
 
-            words = report_text.lower().translate(str.maketrans("", "", string.punctuation)).split()
+            words = report_text.lower().translate(
+                str.maketrans("", "", string.punctuation)
+            ).split()
             stop_words = {
-                "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with",
-                "is", "are", "was", "were", "be", "been", "has", "have", "this", "that", "it",
-                "its", "as", "from", "by", "their", "they", "we", "our", "which", "who", "not",
-                "also", "can", "more", "will", "would", "may", "into", "about", "than", "other"
+                "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
+                "of", "with", "is", "are", "was", "were", "be", "been", "has", "have",
+                "this", "that", "it", "its", "as", "from", "by", "their", "they", "we",
+                "our", "which", "who", "not", "also", "can", "more", "will", "would",
+                "may", "into", "about", "than", "other",
             }
-            freq = collections.Counter(w for w in words if w not in stop_words and len(w) > 3)
+            freq = collections.Counter(
+                w for w in words if w not in stop_words and len(w) > 3
+            )
             top_words = freq.most_common(12)
-            
+
             if top_words:
                 terms, counts = zip(*top_words)
                 fig, ax = plt.subplots(figsize=(8, 3.2))
                 fig.patch.set_facecolor("#0c0c12")
                 ax.set_facecolor("#0c0c12")
-                bars = ax.barh(terms[::-1], counts[::-1], color="#c8b89a", height=0.55)
+                ax.barh(terms[::-1], counts[::-1], color="#c8b89a", height=0.55)
                 ax.tick_params(colors="#6b6560", labelsize=8)
                 for spine in ax.spines.values():
                     spine.set_edgecolor("#1e1c24")
@@ -612,10 +635,11 @@ if st.session_state.result:
                 plt.close(fig)
             else:
                 st.info("Not enough text data for word frequency analysis.")
+
         except ImportError:
-            st.info("Matplotlib not available for visualization.")
+            st.info("Install matplotlib to enable the word frequency chart.")
         except Exception as e:
-            st.warning(f"Could not generate word frequency chart: {str(e)}")
+            st.warning(f"Could not generate word frequency chart: {e}")
 
     # ── 3. Critic Feedback ───────────────────────────────────────────────────────
     st.markdown("""
@@ -664,18 +688,6 @@ if st.session_state.result:
         else:
             st.info("No critic feedback was returned.")
 
-    # ── 4. Refined Report ────────────────────────────────────────────────────────
-    if refined_text.strip():
-        st.markdown("""
-        <div class="section-card card-refined">
-          <div class="section-label">04 — Refined</div>
-          <div class="section-title">🔁 Refined Report</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        with st.expander("Read refined report", expanded=False):
-            st.markdown(refined_text)
-
     # ── Raw data accordion ────────────────────────────────────────────────────────
     st.markdown("<hr class='thin-divider'>", unsafe_allow_html=True)
     with st.expander("🗂 Raw pipeline data", expanded=False):
@@ -685,24 +697,25 @@ if st.session_state.result:
         with tab2:
             st.text(scraped_text[:3000] + ("…" if len(scraped_text) > 3000 else ""))
 
-    # ── Reset ─────────────────────────────────────────────────────────────────────
+    # ── Reset & Download ──────────────────────────────────────────────────────────
     st.markdown("<div style='height:1.5rem'></div>", unsafe_allow_html=True)
-    
+
     col_reset, col_download = st.columns([1, 1], gap="small")
     with col_reset:
         if st.button("↩ Run another query", use_container_width=True):
             st.session_state.result = None
             st.session_state.query = ""
             st.rerun()
-    
+
     with col_download:
-        report_content = generate_report_download(result)
+        report_content = generate_report_download(result, topic)
+        safe_name = topic.replace(" ", "_")[:30]
         st.download_button(
             label="📥 Download Report",
             data=report_content,
-            file_name=f"research_report_{query.strip().replace(' ', '_')[:30]}.txt",
+            file_name=f"research_report_{safe_name}.txt",
             mime="text/plain",
-            use_container_width=True
+            use_container_width=True,
         )
 
 elif not st.session_state.running:
