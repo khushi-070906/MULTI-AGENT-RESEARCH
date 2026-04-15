@@ -4,8 +4,8 @@ agents.py
 Defines the four components used by pipeline.py:
   - build_search_agent()  → LangChain agent with Tavily search
   - build_reader_agent()  → LangChain agent with web scraping
-  - writer_chain          → LLMChain that drafts a research report
-  - critic_chain          → LLMChain that scores and critiques the report
+  - writer_chain          → LCEL chain that drafts a research report
+  - critic_chain          → LCEL chain that scores and critiques the report
 
 Requirements:
     pip install langchain langchain-openai langchain-community tavily-python requests beautifulsoup4
@@ -16,15 +16,20 @@ Environment variables required:
 """
 
 import os
-from langchain_openai import ChatOpenAI
-from langchain.agents import AgentExecutor, create_openai_tools_agent
-from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.chains import LLMChain
-from langchain.prompts import PromptTemplate
-from langchain_community.tools.tavily_search import TavilySearchResults
-from langchain.tools import Tool
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 import requests
 from bs4 import BeautifulSoup
+
+# ── LangChain imports (compatible with langchain>=0.2) ────────────────────────
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder, PromptTemplate
+from langchain_core.tools import Tool
+from langchain_core.output_parsers import StrOutputParser
+from langchain.agents import AgentExecutor, create_openai_tools_agent
+from langchain_community.tools.tavily_search import TavilySearchResults
+
 
 # ── Shared LLM ────────────────────────────────────────────────────────────────
 
@@ -44,16 +49,11 @@ def _scrape_url(url: str) -> str:
         resp = requests.get(url.strip(), headers=headers, timeout=10)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
-
-        # Remove boilerplate tags
         for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
             tag.decompose()
-
         text = soup.get_text(separator="\n", strip=True)
-        # Collapse blank lines
         lines = [l for l in text.splitlines() if l.strip()]
-        cleaned = "\n".join(lines)
-        return cleaned[:4000]
+        return "\n".join(lines)[:4000]
     except Exception as e:
         return f"Failed to scrape {url}: {e}"
 
@@ -81,7 +81,6 @@ def build_search_agent() -> AgentExecutor:
         max_results=5,
         tavily_api_key=tavily_key,
     )
-
     tools = [search_tool]
     llm = _get_llm(temperature=0.1)
 
@@ -129,7 +128,7 @@ def build_reader_agent() -> AgentExecutor:
     return AgentExecutor(agent=agent, tools=tools, verbose=True, max_iterations=4)
 
 
-# ── Writer Chain ──────────────────────────────────────────────────────────────
+# ── Writer Chain (LCEL) ───────────────────────────────────────────────────────
 
 _WRITER_PROMPT = PromptTemplate(
     input_variables=["topic", "research"],
@@ -141,29 +140,25 @@ RESEARCH MATERIAL:
 {research}
 
 Your report must include:
-1. **Executive Summary** – 2-3 sentence overview of the key findings.
-2. **Background & Context** – Why this topic matters and relevant history.
-3. **Key Findings** – The most important discoveries, trends, or developments (use sub-sections).
-4. **Data & Evidence** – Specific statistics, studies, or quotes from the research (cite sources inline).
-5. **Implications** – What these findings mean for the field or society.
-6. **Conclusion** – A concise wrap-up with forward-looking perspective.
+1. **Executive Summary** - 2-3 sentence overview of the key findings.
+2. **Background & Context** - Why this topic matters and relevant history.
+3. **Key Findings** - The most important discoveries, trends, or developments (use sub-sections).
+4. **Data & Evidence** - Specific statistics, studies, or quotes from the research (cite sources inline).
+5. **Implications** - What these findings mean for the field or society.
+6. **Conclusion** - A concise wrap-up with forward-looking perspective.
 
 Formatting rules:
 - Use markdown headers (## and ###).
 - Include at least one ASCII diagram or table where appropriate.
 - Be factual, balanced, and precise. Do not invent information not present in the research.
-- Aim for 600–900 words.
+- Aim for 600-900 words.
 """,
 )
 
-writer_chain = LLMChain(
-    llm=_get_llm(temperature=0.4),
-    prompt=_WRITER_PROMPT,
-    verbose=True,
-)
+writer_chain = _WRITER_PROMPT | _get_llm(temperature=0.4) | StrOutputParser()
 
 
-# ── Critic Chain ──────────────────────────────────────────────────────────────
+# ── Critic Chain (LCEL) ───────────────────────────────────────────────────────
 
 _CRITIC_PROMPT = PromptTemplate(
     input_variables=["report"],
@@ -187,12 +182,8 @@ WEAKNESSES:
 IMPROVEMENTS:
 - List 2-3 concrete, actionable suggestions to improve the report.
 
-Be direct, specific, and constructive. Do not summarise the report — only evaluate it.
+Be direct, specific, and constructive. Do not summarise the report - only evaluate it.
 """,
 )
 
-critic_chain = LLMChain(
-    llm=_get_llm(temperature=0.2),
-    prompt=_CRITIC_PROMPT,
-    verbose=True,
-)
+critic_chain = _CRITIC_PROMPT | _get_llm(temperature=0.2) | StrOutputParser()
