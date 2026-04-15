@@ -1,162 +1,198 @@
-from langchain.agents import AgentExecutor
-from langchain.agents import create_tool_calling_agent
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from tools import web_search, scrape_url
+"""
+agents.py
+---------
+Defines the four components used by pipeline.py:
+  - build_search_agent()  → LangChain agent with Tavily search
+  - build_reader_agent()  → LangChain agent with web scraping
+  - writer_chain          → LLMChain that drafts a research report
+  - critic_chain          → LLMChain that scores and critiques the report
+
+Requirements:
+    pip install langchain langchain-openai langchain-community tavily-python requests beautifulsoup4
+
+Environment variables required:
+    OPENAI_API_KEY   – your OpenAI key
+    TAVILY_API_KEY   – your Tavily key
+"""
+
 import os
 from langchain_openai import ChatOpenAI
-from dotenv import load_dotenv
+from langchain.agents import AgentExecutor, create_openai_tools_agent
+from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain.chains import LLMChain
+from langchain.prompts import PromptTemplate
+from langchain_community.tools.tavily_search import TavilySearchResults
+from langchain.tools import Tool
+import requests
+from bs4 import BeautifulSoup
 
-load_dotenv()
-# ── Cached Agent Singletons ────────────────────────────────────────────────────
-_search_agent = None
-_reader_agent = None
+# ── Shared LLM ────────────────────────────────────────────────────────────────
 
-openai_api_key = os.getenv("OPENAI_API_KEY")
-if not openai_api_key:
-    raise SystemExit(
-        "Missing OPENAI_API_KEY environment variable. "
-        "Set it in your shell or add it to a .env file in the project root."
-    )
+def _get_llm(temperature: float = 0.3) -> ChatOpenAI:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise EnvironmentError("OPENAI_API_KEY environment variable is not set.")
+    return ChatOpenAI(model="gpt-4o", temperature=temperature, api_key=api_key)
 
-# ── Model Setup ────────────────────────────────────────────────────────────────
-llm = ChatOpenAI(
-    model="gpt-4o-mini",
-    temperature=0,
+
+# ── Web Scraper Tool ──────────────────────────────────────────────────────────
+
+def _scrape_url(url: str) -> str:
+    """Fetch a URL and return cleaned plain text (max 4000 chars)."""
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; ResearchBot/1.0)"}
+        resp = requests.get(url.strip(), headers=headers, timeout=10)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        # Remove boilerplate tags
+        for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
+            tag.decompose()
+
+        text = soup.get_text(separator="\n", strip=True)
+        # Collapse blank lines
+        lines = [l for l in text.splitlines() if l.strip()]
+        cleaned = "\n".join(lines)
+        return cleaned[:4000]
+    except Exception as e:
+        return f"Failed to scrape {url}: {e}"
+
+
+scrape_tool = Tool(
+    name="scrape_webpage",
+    func=_scrape_url,
+    description=(
+        "Scrapes the full text content of a webpage given its URL. "
+        "Use this to read articles, blog posts, or research pages in depth. "
+        "Input must be a valid URL starting with http:// or https://"
+    ),
 )
 
-# ── Agent Prompt Factory ───────────────────────────────────────────────────────
-def _agent_prompt(system_msg: str) -> ChatPromptTemplate:
-    return ChatPromptTemplate.from_messages([
-        ("system", system_msg),
+
+# ── Search Agent ──────────────────────────────────────────────────────────────
+
+def build_search_agent() -> AgentExecutor:
+    """Returns a LangChain agent that uses Tavily to search the web."""
+    tavily_key = os.getenv("TAVILY_API_KEY")
+    if not tavily_key:
+        raise EnvironmentError("TAVILY_API_KEY environment variable is not set.")
+
+    search_tool = TavilySearchResults(
+        max_results=5,
+        tavily_api_key=tavily_key,
+    )
+
+    tools = [search_tool]
+    llm = _get_llm(temperature=0.1)
+
+    prompt = ChatPromptTemplate.from_messages([
+        (
+            "system",
+            (
+                "You are an expert research assistant. "
+                "Use the Tavily search tool to find recent, accurate, and detailed information. "
+                "Always run at least one search query. "
+                "Summarise the key findings clearly, including source URLs where available."
+            ),
+        ),
         ("human", "{input}"),
-        ("placeholder", "{agent_scratchpad}"),
+        MessagesPlaceholder(variable_name="agent_scratchpad"),
     ])
 
-# ── Search Agent ───────────────────────────────────────────────────────────────
-def build_search_agent() -> AgentExecutor:
-    global _search_agent
-    if _search_agent is None:
-        prompt = _agent_prompt(
-            "You are a research assistant. Search the web to find accurate, relevant information."
-        )
-        agent = create_tool_calling_agent(llm=llm, tools=[web_search], prompt=prompt)
-        _search_agent = AgentExecutor(agent=agent, tools=[web_search], verbose=True)
-    return _search_agent
+    agent = create_openai_tools_agent(llm=llm, tools=tools, prompt=prompt)
+    return AgentExecutor(agent=agent, tools=tools, verbose=True, max_iterations=5)
 
+
+# ── Reader Agent ──────────────────────────────────────────────────────────────
 
 def build_reader_agent() -> AgentExecutor:
-    global _reader_agent
-    if _reader_agent is None:
-        prompt = _agent_prompt(
-            "You are a content extractor. Scrape and summarize web pages clearly and concisely."
-        )
-        agent = create_tool_calling_agent(llm=llm, tools=[scrape_url], prompt=prompt)
-        _reader_agent = AgentExecutor(agent=agent, tools=[scrape_url], verbose=True)
-    return _reader_agent
+    """Returns a LangChain agent that scrapes a URL for deeper content."""
+    tools = [scrape_tool]
+    llm = _get_llm(temperature=0.1)
 
-# ── Writer Chain (LCEL) ────────────────────────────────────────────────────────
-writer_prompt = ChatPromptTemplate.from_messages([
-    ("system", "You are an expert research writer, data analyst, and technical explainer."),
-     ("human", """Write a detailed research report on the topic below.
+    prompt = ChatPromptTemplate.from_messages([
+        (
+            "system",
+            (
+                "You are a web research specialist. "
+                "Given search results, identify the single most relevant URL and scrape it "
+                "using the scrape_webpage tool to extract in-depth content. "
+                "Return a detailed summary of the scraped content, preserving key facts, "
+                "statistics, quotes, and section headings."
+            ),
+        ),
+        ("human", "{input}"),
+        MessagesPlaceholder(variable_name="agent_scratchpad"),
+    ])
 
-Topic: {topic}
+    agent = create_openai_tools_agent(llm=llm, tools=tools, prompt=prompt)
+    return AgentExecutor(agent=agent, tools=tools, verbose=True, max_iterations=4)
 
-Research Gathered:
+
+# ── Writer Chain ──────────────────────────────────────────────────────────────
+
+_WRITER_PROMPT = PromptTemplate(
+    input_variables=["topic", "research"],
+    template="""You are a professional research analyst and science writer.
+
+Using the research material provided below, write a comprehensive, well-structured research report on the topic: "{topic}".
+
+RESEARCH MATERIAL:
 {research}
 
-Structure the report as:
-- Introduction
-- Key Findings (minimum 3 well-explained points)
-- Visual Insights (VERY IMPORTANT)
-- Conclusion
-- Sources (list all URLs found in the research)
+Your report must include:
+1. **Executive Summary** – 2-3 sentence overview of the key findings.
+2. **Background & Context** – Why this topic matters and relevant history.
+3. **Key Findings** – The most important discoveries, trends, or developments (use sub-sections).
+4. **Data & Evidence** – Specific statistics, studies, or quotes from the research (cite sources inline).
+5. **Implications** – What these findings mean for the field or society.
+6. **Conclusion** – A concise wrap-up with forward-looking perspective.
 
-IMPORTANT INSTRUCTIONS:
+Formatting rules:
+- Use markdown headers (## and ###).
+- Include at least one ASCII diagram or table where appropriate.
+- Be factual, balanced, and precise. Do not invent information not present in the research.
+- Aim for 600–900 words.
+""",
+)
 
-1. The report must be clear, structured, and professional.
-2. Under "Key Findings", explain each point with depth and clarity.
+writer_chain = LLMChain(
+    llm=_get_llm(temperature=0.4),
+    prompt=_WRITER_PROMPT,
+    verbose=True,
+)
 
-3. VERY IMPORTANT - VISUAL INSIGHTS SECTION:
-   - Include at least ONE diagram (ASCII flowchart or system diagram)
-   - Include at least ONE graph representation
 
-4. GRAPH RULES:
-   - If the topic involves trends → use a line graph
-   - If comparison → use a bar chart
-   - Represent graph in TWO ways:
-     a) ASCII/text-based graph
-     b) Python matplotlib code to generate the graph
+# ── Critic Chain ──────────────────────────────────────────────────────────────
 
-5. DIAGRAM RULES:
-   - Use clean ASCII diagrams (flowchart style)
-   - Make them readable and aligned
+_CRITIC_PROMPT = PromptTemplate(
+    input_variables=["report"],
+    template="""You are a rigorous academic editor and research critic.
 
-6. PYTHON CODE:
-   - Include a working matplotlib code snippet
-   - Keep it simple and executable
+Review the following research report and provide structured feedback.
 
-7. DO NOT skip visual section even if data is limited — infer reasonable structure.
-
-Be detailed, factual, and insightful. """),
-])
-writer_chain = writer_prompt | llm | StrOutputParser()
-
-#critic promt
-
-critic_prompt = ChatPromptTemplate.from_messages([
-    ("system", """You are an expert research evaluator, editor, and academic reviewer.
-
-You are STRICT, analytical, and constructive.
-You do not give high scores easily.
-You focus on clarity, depth, factual accuracy, structure, and usefulness.
-
-Your goal is to improve the quality of the report to a professional level."""),
-    
-    ("human", """Critically evaluate the research report below.
-
-Report:
+REPORT:
 {report}
 
-Evaluate based on:
-1. Clarity & Structure
-2. Depth of Analysis
-3. Factual Accuracy
-4. Use of Examples
-5. Quality of Visuals (graphs/diagrams if present)
-6. Completeness
+Your feedback must follow this exact structure:
 
-Respond in EXACT format:
+SCORE: [X/10]
 
-Score: X/10
+STRENGTHS:
+- List 2-3 specific things the report does well.
 
-Detailed Breakdown:
-- Clarity & Structure: X/10
-- Depth of Analysis: X/10
-- Factual Accuracy: X/10
-- Examples & Explanation: X/10
-- Visual Elements: X/10
-- Completeness: X/10
+WEAKNESSES:
+- List 2-3 specific weaknesses or gaps.
 
-Strengths:
-- ...
-- ...
-- ...
+IMPROVEMENTS:
+- List 2-3 concrete, actionable suggestions to improve the report.
 
-Weaknesses:
-- ...
-- ...
-- ...
+Be direct, specific, and constructive. Do not summarise the report — only evaluate it.
+""",
+)
 
-Specific Improvements:
-- (Actionable fix 1)
-- (Actionable fix 2)
-- (Actionable fix 3)
-
-Missing Elements (if any):
-- ...
-
-One-line Verdict:
-...""")
-])
-critic_chain = critic_prompt | llm | StrOutputParser()
+critic_chain = LLMChain(
+    llm=_get_llm(temperature=0.2),
+    prompt=_CRITIC_PROMPT,
+    verbose=True,
+)
