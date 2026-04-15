@@ -34,7 +34,7 @@ def _agent_prompt(system_msg: str) -> ChatPromptTemplate:
     ])
 
 # ── Search Agent ───────────────────────────────────────────────────────────────
-    def build_search_agent() -> AgentExecutor:
+def build_search_agent() -> AgentExecutor:
     global _search_agent
     if _search_agent is None:
         prompt = _agent_prompt(
