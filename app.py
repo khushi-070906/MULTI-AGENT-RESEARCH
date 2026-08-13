@@ -3,15 +3,6 @@ import time
 import re
 from typing import Dict, Any, Optional
 from pipeline import run_research_pipeline
-import subprocess
-
-@app.get("/version")
-def version():
-    try:
-        sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd="/app").stdout.strip()
-    except Exception:
-        sha = "unknown"
-    return {"commit": sha}
 
 # ─── Constants ──────────────────────────────────────────────────────────────────
 
